@@ -16,7 +16,6 @@ from app.services.seat_engine import (
     replay_journal,
 )
 
-from app.services.page_rollup import mix_stats, mix_violations
 router = APIRouter(prefix="/seating", tags=["seating"])
 
 
@@ -102,9 +101,12 @@ def latest(hall_id: int = 1, db: Session = Depends(get_db)):
     ).first()
     if not plan:
         return run_seating(hall_id=hall_id, db=db)
+    hall = db.get(Hall, hall_id)
+    if not hall:
+        raise HTTPException(404, "考室不存在")
     data = json.loads(plan.result_json)
     journal = _journal_entries(db, hall_id, plan.id)
-    data["replay_ok"] = _journal_replays_plan(hall, journal, data) if journal else False
+    data["replay_ok"] = _journal_replays_plan(hall, journal, data)
     return {"id": plan.id, **data}
 
 
@@ -158,5 +160,15 @@ def violations(hall_id: int = 1, db: Session = Depends(get_db)):
 
 @router.get("/stats")
 def stats(hall_id: int = 1, db: Session = Depends(get_db)):
+    """真实统计：直接数当前图，不做任何"页侧折算"。"""
     data = latest(hall_id=hall_id, db=db)
-    return {"hall_id": hall_id, **mix_stats(data)}
+    return {
+        "hall_id": hall_id,
+        "plan_id": data.get("id"),
+        "replay_ok": data.get("replay_ok", False),
+        "seated": len(data.get("assignments", [])),
+        "unplaced": len(data.get("unplaced", [])),
+        "violations": len(data.get("violations", [])),
+        "capacity": data.get("rows", 0) * data.get("cols", 0),
+        "journal_entries": len(data.get("journal", [])),
+    }

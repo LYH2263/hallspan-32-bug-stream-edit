@@ -57,27 +57,44 @@ def test_duplicate_ticket_rejected_entire_session():
         place_candidates(4, 4, 1, cands)
 
 
-def test_seeded_shuffle_not_ticket_order_but_replayable():
-    # 种子打乱准考证号后再排：不同 seed 应可能产出不同图，
-    # 但无论哪个 seed，流水都升序、可重放当前图。
+def test_smaller_ticket_seats_first_without_being_displaced():
+    # 1 排 2 列、min_dist=2：两个座位相距只有 1，整场只能坐下一人。
+    # 必须是小号 T001 落座、大号 T002 进未排——
+    # 旧实现按降序抢座，T002 会占走 T001 唯一能坐的格。
+    cands = [
+        {"id": 1, "name": "A", "ticket_no": "T001", "paper_id": 1},
+        {"id": 2, "name": "B", "ticket_no": "T002", "paper_id": 2},
+    ]
+    assigns, unplaced, journal = place_candidates(1, 2, 2, cands)
+    assert [a.ticket_no for a in assigns] == ["T001"]
+    assert [u["ticket_no"] for u in unplaced] == ["T002"]
+    assert [(e.seq, e.ticket_no) for e in journal] == [(1, "T001")]
+    assert replay_matches(1, 2, assigns, journal)
+
+
+def test_placement_is_ticket_ascending_and_replayable_regardless_of_input_order():
+    # 输入顺序故意打乱；落座、流水仍按准考证号从小到大，
+    # 流水升序、seq 连续，并且该段流水能从早到晚重放出当前图。
     cands = [{"id": i, "name": f"C{i}", "ticket_no": f"T{2026000 + i}",
               "paper_id": 1 + (i % 3)} for i in range(12)]
-    layouts = set()
-    for seed in range(1, 9):
-        assigns, unplaced, journal = place_candidates(5, 6, 2, cands, seed=seed)
-        # 流水升序
-        tickets = [e.ticket_no for e in journal]
-        assert tickets == sorted(tickets)
-        # 该段流水必须能重放出当前图
-        assert replay_matches(5, 6, assigns, journal)
-        layouts.add(tuple(sorted((a.candidate_id, a.row, a.col) for a in assigns)))
-    assert len(layouts) > 1  # 打乱确实影响了落座，而非死按准考证号占座
+    shuffled = list(reversed(cands))
+    assigns, unplaced, journal = place_candidates(5, 6, 2, shuffled)
+    tickets = [e.ticket_no for e in journal]
+    assert tickets == sorted(tickets)
+    assert [e.seq for e in journal] == list(range(1, len(journal) + 1))
+    assert replay_matches(5, 6, assigns, journal)
+    # 与"按正序输入"产出同一张图：落座只由准考证号次序决定
+    assigns2, unplaced2, journal2 = place_candidates(5, 6, 2, cands)
+    assert {(a.candidate_id, a.row, a.col) for a in assigns} == \
+           {(a.candidate_id, a.row, a.col) for a in assigns2}
+    assert [u["id"] for u in unplaced] == [u["id"] for u in unplaced2]
+    assert journal_to_dicts(journal) == journal_to_dicts(journal2)
 
 
 def test_journal_replays_current_map():
     cands = [{"id": i, "name": f"C{i}", "ticket_no": f"T{100 + i}",
               "paper_id": 1 + (i % 2)} for i in range(6)]
-    assigns, _, journal = place_candidates(4, 4, 2, cands, seed=7)
+    assigns, _, journal = place_candidates(4, 4, 2, cands)
     grid = replay_journal(4, 4, journal)
     expect = {(a.row, a.col): a.candidate_id for a in assigns}
     assert grid == expect
@@ -94,7 +111,7 @@ def test_same_row_same_tail_forces_other_seat_or_unplaced():
         {"id": 2, "name": "B", "ticket_no": "T11", "paper_id": 2},
         {"id": 3, "name": "C", "ticket_no": "T21", "paper_id": 3},
     ]
-    assigns, unplaced, journal = place_candidates(3, 3, 1, cands, seed=3)
+    assigns, unplaced, journal = place_candidates(3, 3, 1, cands)
     assert len(assigns) + len(unplaced) == 3
     rows_used = [a.row for a in assigns]
     assert len(rows_used) == len(set(rows_used))  # 同排无重复尾号
@@ -106,7 +123,7 @@ def test_same_tail_overflow_goes_unplaced_without_displacing():
     # 3 排最多容纳 3 个同尾号，第 4、5 个只能进未排，先号格子不动。
     cands = [{"id": i, "name": f"C{i}", "ticket_no": f"T{i}1",
               "paper_id": i + 1} for i in range(5)]
-    assigns, unplaced, journal = place_candidates(3, 3, 1, cands, seed=11)
+    assigns, unplaced, journal = place_candidates(3, 3, 1, cands)
     assert len(assigns) == 3
     assert len(unplaced) == 2
     seated_ids = {a.candidate_id for a in assigns}

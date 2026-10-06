@@ -6,12 +6,12 @@ onMounted(async () => { s.value = await api('/seating/stats?hall_id=1') })
 </script>
 <template>
   <h1>统计</h1>
-  <p class="sub">排座占用与违规汇总 · 按最新号重写流水</p>
+  <p class="sub">排座占用与违规汇总 · 数字直接取自当前排座图与流水</p>
   <div class="card" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1rem">
     <div><div class="muted">已排座</div><div class="stat">{{ s.seated }}</div></div>
     <div><div class="muted">未排上</div><div class="stat">{{ s.unplaced }}</div></div>
     <div><div class="muted">违规数</div><div class="stat">{{ s.violations }}</div></div>
     <div><div class="muted">座位容量</div><div class="stat">{{ s.capacity }}</div></div>
   </div>
-  <p v-if="s.page_split" class="muted">页侧人数 {{ s.seated }} / 未排 {{ s.unplaced }}</p>
+  <p v-if="s.replay_ok === false" class="muted" style="color:#c0392b">最新流水与图不一致，该段已作废</p>
 </template>

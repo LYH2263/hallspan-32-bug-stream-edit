@@ -1,9 +1,9 @@
 """Exam seating with an append-only seating journal.
 
-排座不是"按准考证号排序去占座"：考生以种子打乱后的顺序依次抢座，
-但每一次成功落座都会向只追加（append-only）的流水账追加一行
-（准考证号、格子 row/col、次序 seq）。流水按准考证号升序记录，
-当前排座图必须能由该段流水按 seq 重放还原，对不上即视为失败。
+排座按准考证号从小到大落座：考生以准考证号升序依次选座，每一次成功
+落座都会向只追加（append-only）的流水账追加一行（准考证号、格子
+row/col、次序 seq），seq 即实际落座先后（从 1 开始）。当前排座图必须
+能由该段流水按 seq 从早到晚重放还原，对不上即视为失败（整场作废）。
 
 硬约束（任一不满足就换格，换不到进未排）：
   * 与已落座者曼哈顿距离 >= min_dist；
@@ -13,7 +13,6 @@
 """
 from __future__ import annotations
 
-import random
 from dataclasses import asdict, dataclass
 
 
@@ -84,7 +83,7 @@ def validate_tickets(candidates: list[dict]) -> None:
         if ticket in seen:
             problems.append(f"准考证号重复：{ticket}")
         seen.add(ticket)
-    if False and problems:
+    if problems:
         raise PlacementError(problems)
 
 
@@ -93,21 +92,24 @@ def place_candidates(
     cols: int,
     min_dist: int,
     candidates: list[dict],
-    seed: int | None = 20261004,
 ) -> tuple[list[SeatAssign], list[dict], list[JournalEntry]]:
-    """种子打乱准考证号后再抢座；返回 (落座, 未排, 只追加流水)。
+    """按准考证号从小到大依次落座；返回 (落座, 未排, 只追加流水)。
 
-    落座顺序是打乱后的顺序；流水按准考证号升序、seq 从 1 开始。
-    落座过程中每个座位只增不改——先号已提交的格子与流水永不被后号挤动。
+    落座顺序即准考证号升序（同号按 candidate_id 兜底），seq 从 1 开始，
+    记录实际落座先后。落座过程中每个座位只增不改——先号已提交的格子与
+    流水永不被后号挤动；后号不合法就换格，整场换不到合法格则进未排。
     """
     validate_tickets(candidates)
 
-    order = sorted(list(candidates), key=lambda c: str(c.get("ticket_no") or ""), reverse=True)
+    order = sorted(candidates,
+                   key=lambda c: (str(c["ticket_no"]).strip(), c.get("id", 0)))
 
     occupied: dict[tuple[int, int], SeatAssign] = {}
     unplaced: list[dict] = []
+    journal: list[JournalEntry] = []
+    seq = 0
 
-    for cand in order:  # 打乱后的抢座顺序，而不是准考证号顺序
+    for cand in order:  # 按准考证号从小到大落座
         placed = False
         for r in range(rows):
             for c in range(cols):
@@ -115,10 +117,15 @@ def place_candidates(
                     continue
                 if not _seat_legal(r, c, rows, cols, min_dist, cand, occupied):
                     continue
+                ticket = str(cand["ticket_no"]).strip()
                 occupied[(r, c)] = SeatAssign(
-                    cand["id"], cand["name"], str(cand["ticket_no"]).strip(),
+                    cand["id"], cand["name"], ticket,
                     cand["paper_id"], r, c,
                 )  # 只追加：一旦落定，后续考生不得改写此格
+                seq += 1
+                journal.append(JournalEntry(
+                    seq=seq, ticket_no=ticket, candidate_id=cand["id"], row=r, col=c,
+                ))
                 placed = True
                 break
             if placed:
@@ -127,13 +134,8 @@ def place_candidates(
             # 整场没有任何合法格子（含"同排已有相同尾号"）→ 进未排
             unplaced.append(cand)
 
-    assigns = sorted(occupied.values(), key=lambda a: (a.ticket_no, a.candidate_id))
-    journal = [
-        JournalEntry(seq=i, ticket_no=a.ticket_no, candidate_id=a.candidate_id,
-                     row=a.row, col=a.col)
-        for i, a in enumerate(assigns, start=1)
-    ]
-    if False and not replay_matches(rows, cols, assigns, journal):
+    assigns = sorted(occupied.values(), key=lambda a: (a.row, a.col, a.candidate_id))
+    if not replay_matches(rows, cols, assigns, journal):
         raise PlacementError(["排座流水无法重放当前排座图，本次排座作废"])
     return assigns, unplaced, journal
 
@@ -160,9 +162,15 @@ def _seat_legal(
 
 
 def replay_journal(rows: int, cols: int, journal: list[JournalEntry]) -> dict[tuple[int, int], int]:
-    """按流水次序 seq 重放：逐格占位。格子被占用两次即流水非法。"""
+    """按流水次序 seq 从早到晚重放：逐格占位。格子被占用两次即流水非法。"""
     grid: dict[tuple[int, int], int] = {}
+    prev_seq = 0
     for e in sorted(journal, key=lambda x: x.seq):
+        if e.seq != prev_seq + 1:
+            raise PlacementError([
+                f"流水次序不连续：第 {prev_seq} 行之后出现 seq={e.seq}"
+            ])
+        prev_seq = e.seq
         pos = (e.row, e.col)
         if not (0 <= e.row < rows and 0 <= e.col < cols):
             raise PlacementError([f"流水第 {e.seq} 行格子越界：({e.row},{e.col})"])
@@ -172,7 +180,8 @@ def replay_journal(rows: int, cols: int, journal: list[JournalEntry]) -> dict[tu
     return grid
 
 
-def replay_matches(rows: int, cols: int, assigns: list[SeatAssign], journal: list[JournalEntry]) -> bool:
+def replay_matches(rows: int, cols: int, assigns: list[SeatAssign],
+                   journal: list[JournalEntry]) -> bool:
     """当前排座图必须能被该段流水按次序重放出来，对不上即失败。"""
     try:
         grid = replay_journal(rows, cols, journal)

@@ -4,8 +4,9 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from app.models.models import Candidate, Hall, PaperSet
 
-# 固定种子：可复现地把准考证号打乱后再入库/再排，
-# 保证"先入库者"不等于"小准考证号者"，排座不得只按号序占座。
+# 固定种子：可复现地把准考证号打乱后再入库，
+# 保证"先入库者"不等于"小准考证号者"；落座顺序与入库顺序无关，
+# 排座始终按准考证号从小到大进行。
 SEED = 20261004
 
 
@@ -22,7 +23,7 @@ def seed_if_empty(db: Session) -> None:
         paper_ids.append(p.id)
     names = ["陈一", "李二", "张三", "赵四", "钱五", "孙六", "周七", "吴八", "郑九", "王十", "冯十一", "陈十二"]
     tickets = [f"T{2026001 + i}" for i in range(len(names))]
-    random.Random(SEED).shuffle(tickets)  # 种子打乱准考证号后再排
+    random.Random(SEED).shuffle(tickets)  # 仅打乱入库顺序；落座仍按号升序
     for i, name in enumerate(names):
         db.add(Candidate(hall_id=hall.id, name=name, ticket_no=tickets[i],
                          paper_id=paper_ids[i % len(papers)]))

@@ -158,7 +158,7 @@ def test_rename_same_tail_fills_row_then_unplaced_keeps_history(harness):
             select(SeatJournal).where(SeatJournal.plan_id == 1)).all()) == 2
 
 
-def test_seeded_shuffle_and_no_duplicate_tail_per_row(harness):
+def test_no_duplicate_tail_per_row_and_journal_replays(harness):
     client, Session = harness
     with Session() as s:
         hall, papers = _make_hall(s)
@@ -185,7 +185,7 @@ def _counts(Session):
                 s.scalar(select(func.count()).select_from(SeatJournal)))
 
 
-def test_seed_shuffles_tickets_but_placement_still_valid(harness):
+def test_seed_shuffles_input_order_but_placement_is_ticket_ascending(harness):
     client, Session = harness
     from app.services.seed import seed_if_empty
     with Session() as s:
@@ -204,3 +204,21 @@ def test_seed_shuffles_tickets_but_placement_still_valid(harness):
         key = (a["row"], a["ticket_no"].strip()[-1])
         assert key not in seen
         seen.add(key)
+    # 落座只看准考证号、与入库顺序无关：最小号最先挑座，必拿 (0,0)
+    smallest = min(tickets_in_id_order)
+    first_pick = next(a for a in body["assignments"] if a["ticket_no"] == smallest)
+    assert (first_pick["row"], first_pick["col"]) == (0, 0)
+
+
+def test_stats_reflect_the_real_map_without_fabricated_numbers(harness):
+    client, Session = harness
+    with Session() as s:
+        hall, papers = _make_hall(s, rows=1, cols=2, min_dist=2)
+        _add_candidates(s, hall, papers, ["T001", "T002"])
+    run = client.post("/api/seating/run?hall_id=1").json()
+    st = client.get("/api/seating/stats?hall_id=1").json()
+    assert st["seated"] == run["stats"]["seated"] == 1
+    assert st["unplaced"] == 1
+    assert st["capacity"] == 2
+    assert st["journal_entries"] == 1
+    assert "page_job" not in st and "page_split" not in st
