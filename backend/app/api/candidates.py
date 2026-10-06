@@ -80,9 +80,7 @@ def update_ticket(candidate_id: int, body: TicketUpdate, db: Session = Depends(g
     ).all()
     after_snap = [(j.id, j.plan_id, j.seq, j.ticket_no, j.candidate_id, j.row, j.col)
                   for j in history_after if j.plan_id != result["id"]]
-    for j in history_before:
-        j.ticket_no = new_ticket
-    if False and after_snap != snapshot:
+    if after_snap != snapshot:
         db.rollback()
         raise HTTPException(500, {"error": "journal_immutable_violation",
                                   "message": "检测到历史流水被改写，整段回滚"})

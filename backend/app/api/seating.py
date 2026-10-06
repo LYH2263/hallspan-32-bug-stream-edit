@@ -102,6 +102,9 @@ def latest(hall_id: int = 1, db: Session = Depends(get_db)):
     ).first()
     if not plan:
         return run_seating(hall_id=hall_id, db=db)
+    hall = db.get(Hall, hall_id)
+    if not hall:
+        raise HTTPException(404, "考室不存在")
     data = json.loads(plan.result_json)
     journal = _journal_entries(db, hall_id, plan.id)
     data["replay_ok"] = _journal_replays_plan(hall, journal, data) if journal else False
@@ -116,6 +119,9 @@ def journal(hall_id: int = 1, db: Session = Depends(get_db)):
     ).first()
     if not plan:
         return {"hall_id": hall_id, "plan_id": None, "entries": [], "replay_ok": False}
+    hall = db.get(Hall, hall_id)
+    if not hall:
+        raise HTTPException(404, "考室不存在")
     entries = _journal_entries(db, hall_id, plan.id)
     data = json.loads(plan.result_json)
     ok = _journal_replays_plan(hall, entries, data)

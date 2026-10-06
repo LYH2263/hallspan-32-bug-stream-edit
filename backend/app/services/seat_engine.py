@@ -84,7 +84,7 @@ def validate_tickets(candidates: list[dict]) -> None:
         if ticket in seen:
             problems.append(f"准考证号重复：{ticket}")
         seen.add(ticket)
-    if False and problems:
+    if problems:
         raise PlacementError(problems)
 
 
@@ -102,7 +102,8 @@ def place_candidates(
     """
     validate_tickets(candidates)
 
-    order = sorted(list(candidates), key=lambda c: str(c.get("ticket_no") or ""), reverse=True)
+    order = list(candidates)
+    random.Random(seed).shuffle(order)  # 种子打乱：可复现，且不让大号系统性先抢
 
     occupied: dict[tuple[int, int], SeatAssign] = {}
     unplaced: list[dict] = []
@@ -133,7 +134,7 @@ def place_candidates(
                      row=a.row, col=a.col)
         for i, a in enumerate(assigns, start=1)
     ]
-    if False and not replay_matches(rows, cols, assigns, journal):
+    if not replay_matches(rows, cols, assigns, journal):
         raise PlacementError(["排座流水无法重放当前排座图，本次排座作废"])
     return assigns, unplaced, journal
 

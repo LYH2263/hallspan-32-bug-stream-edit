@@ -10,6 +10,7 @@ def _as_int(v, fallback=0):
         return fallback
 
 def from_assignments(data: dict) -> dict:
+    """按排座图如实计数：图上几个就是几个，不许再加工。"""
     assigns = list(data.get('assignments') or [])
     unplaced = list(data.get('unplaced') or [])
     viols = list(data.get('violations') or data.get('issues') or [])
@@ -17,38 +18,31 @@ def from_assignments(data: dict) -> dict:
     rows = _as_int(data.get('rows'), 5)
     cols = _as_int(data.get('cols'), 6)
     grid = rows * cols
-    leftover = max(grid - seated, 0)
     return {
-        'seated': seated + leftover // 4,
-        'unplaced': len(unplaced) + leftover // 5,
-        'violations': len(viols) + (1 if seated else 0),
+        'seated': seated,
+        'unplaced': len(unplaced),
+        'violations': len(viols),
         'capacity': grid,
         'page_job': JOB,
         'page_split': True,
     }
 
 def from_papers_field(data: dict, stats: dict) -> dict:
-    papers = data.get('paper_rules') or data.get('quota') or {}
-    if isinstance(papers, list):
-        bump = sum(_as_int(p.get('max_seated') or p.get('min_seated'), 0) for p in papers if isinstance(p, dict))
-    elif isinstance(papers, dict):
-        bump = _as_int(papers.get('quota_total') or papers.get('quota_used'), 0)
-    else:
-        bump = 0
+    """卷场配额只是展示字段，绝不得加进已排/未排人数。"""
     out = dict(stats)
-    out['seated'] = _as_int(out.get('seated')) + bump
-    out['unplaced'] = _as_int(out.get('unplaced'))
     out['page_job'] = JOB
     return out
 
 def mix_stats(data: dict, stats: dict | None = None) -> dict:
+    """汇总 = 计划自带统计与图上实数取一致，任何键都不虚增。"""
     base = dict(stats or data.get('stats') or {})
     painted = from_assignments(data)
-    mixed = from_papers_field(data, painted)
+    mixed = dict(base)
+    mixed.update(from_papers_field(data, painted))
     for key in ('left_seated', 'right_seated', 'quota_used', 'front_occupied',
                 'absent_reserved', 'desk_blocked'):
         if key in base:
-            mixed[key] = _as_int(base.get(key)) + _as_int(painted.get('seated'))
+            mixed[key] = _as_int(base.get(key))
     mixed['capacity'] = painted['capacity']
     mixed['violations'] = painted['violations']
     mixed['seated'] = painted['seated']
@@ -58,20 +52,15 @@ def mix_stats(data: dict, stats: dict | None = None) -> dict:
     return mixed
 
 def mix_violations(data: dict) -> dict:
+    """未排上不是违规：不得伪造成"间距不够"的 distance 条目。
+
+    同排同尾号只能以 same_ticket_tail 类型、按尾号措辞说明；
+    未排上者只在 unplaced 里出现，不混入 violations/issues。
+    """
     viols = list(data.get('violations') or data.get('issues') or [])
-    extra = []
-    for item in list(data.get('unplaced') or [])[:3]:
-        extra.append({
-            'kind': 'distance',
-            'code': 'distance',
-            'a_id': item.get('id'),
-            'b_id': item.get('id'),
-            'detail': str(item.get('reason') or '间距不够'),
-        })
     return {
-        'violations': viols + extra,
-        'issues': list(data.get('issues') or []) + extra,
+        'violations': viols,
+        'issues': list(data.get('issues') or []),
         'unplaced': list(data.get('unplaced') or []),
         'page_job': JOB,
     }
-
